@@ -68,10 +68,10 @@ TEMPLATES: List[TemplateProfile] = [
         input_price_headers=[MASS_HEADER_PRICE],
     ),
     TemplateProfile(
-        key="NORMAL_POWERMERCHANT",
-        label="Normal PowerMerchant (pakai M3)",
+        key="NORMAL_PM",
+        label="Normal PM (pakai M4)",
         mode_output="inplace",
-        default_price_key="M3",
+        default_price_key="M4",
         sku_headers=[MASS_HEADER_SKU],
         input_price_headers=[MASS_HEADER_PRICE],
     ),
@@ -94,6 +94,22 @@ TEMPLATES: List[TemplateProfile] = [
     TemplateProfile(
         key="CORET_SHOPEE",
         label="Harga Coret Shopee (pakai M4)",
+        mode_output="generate",
+        default_price_key="M4",
+        sku_headers=[MASS_HEADER_SKU],
+        input_price_headers=[MASS_HEADER_PRICE],
+        input_product_headers=["ID Produk", "ID Produk (wajib)", "Product_id", "Product ID", "Product_id (wajib)", "Product_id(wajib)"],
+        out_product_header="Product_id (wajib)",
+        out_sku_header="SKU_id (wajib)",
+        out_price_header="Harga Penawaran (wajib)",
+        out_extra_headers=[
+            "Total Stok Promosi (opsional)",
+            "Batas Pembelian (opsional)",
+        ],
+    ),
+    TemplateProfile(
+        key="CORET_PM",
+        label="Harga Coret PM (pakai M4)",
         mode_output="generate",
         default_price_key="M4",
         sku_headers=[MASS_HEADER_SKU],
@@ -720,4 +736,5 @@ if process:
             file_name="changes_report.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
+
 
