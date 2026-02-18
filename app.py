@@ -56,15 +56,23 @@ class TemplateProfile:
     label: str
     mode_output: str            # "inplace" | "generate"
     default_price_key: str      # "M3" | "M4"
-    # input header candidates
+
+    # input header candidates (dipakai untuk cari header row + kolom harga)
     sku_headers: List[str]
     input_price_headers: List[str]
-    input_product_headers: Optional[List[str]] = None  # optional (untuk coret)
+
+    # khusus: kalau ID SKU ada di kolom tertentu (mis. kolom D = 4) → pakai ini saat output generate
+    input_sku_id_col_index: Optional[int] = None
+
+    # product_id bisa dari header atau fixed col index (opsional)
+    input_product_headers: Optional[List[str]] = None
+    input_product_id_col_index: Optional[int] = None
+
     # output header names (untuk generate)
     out_product_header: Optional[str] = None
     out_sku_header: Optional[str] = None
     out_price_header: Optional[str] = None
-    out_extra_headers: Optional[List[str]] = None       # headers lain di output (boleh kosong)
+    out_extra_headers: Optional[List[str]] = None
 
 
 TEMPLATES: List[TemplateProfile] = [
@@ -93,14 +101,16 @@ TEMPLATES: List[TemplateProfile] = [
         input_price_headers=[MASS_HEADER_PRICE],
     ),
 
-    # ====== CORET (OUTPUT BEDA) ======
+    # ====== CORET / DISKON (OUTPUT BEDA) ======
+    # NOTE: khusus TikTok & PM -> SKU_id(wajib) = ID SKU di kolom D input (index 4)
     TemplateProfile(
         key="CORET_TIKTOK",
         label="Diskon / Harga Coret TikTok (pakai M3) - output beda",
         mode_output="generate",
         default_price_key="M3",
-        sku_headers=[MASS_HEADER_SKU],
+        sku_headers=[MASS_HEADER_SKU],                  # untuk deteksi header row & data start
         input_price_headers=[MASS_HEADER_PRICE],
+        input_sku_id_col_index=4,                       # ✅ kolom D
         input_product_headers=[
             "ID Produk", "ID Produk (wajib)",
             "Product_id", "Product ID",
@@ -121,6 +131,7 @@ TEMPLATES: List[TemplateProfile] = [
         default_price_key="M4",
         sku_headers=[MASS_HEADER_SKU],
         input_price_headers=[MASS_HEADER_PRICE],
+        # Shopee coret masih pakai SKU Penjual sebagai sku_id (kalau nanti ternyata beda, tinggal set input_sku_id_col_index juga)
         input_product_headers=[
             "ID Produk", "ID Produk (wajib)",
             "Product_id", "Product ID",
@@ -141,6 +152,7 @@ TEMPLATES: List[TemplateProfile] = [
         default_price_key="M4",
         sku_headers=[MASS_HEADER_SKU],
         input_price_headers=[MASS_HEADER_PRICE],
+        input_sku_id_col_index=4,                       # ✅ kolom D
         input_product_headers=[
             "ID Produk", "ID Produk (wajib)",
             "Product_id", "Product ID",
@@ -252,7 +264,7 @@ def find_header_cols_and_data_start(
     ws,
     sku_candidates: List[str],
     price_candidates: List[str],
-    scan_rows: int = 50,
+    scan_rows: int = 60,
 ) -> Tuple[int, int, int, int]:
     """
     Return: (header_row, sku_col, price_col, data_start_row)
@@ -447,7 +459,7 @@ def compute_new_price_for_row(
     pl_map: Dict[str, Dict[str, int]],
     addon_map: Dict[str, int],
     discount_rp: int,
-    price_key: str,   # "M3" / "M4"
+    price_key: str,
 ) -> Tuple[Optional[int], str]:
     base_sku, addons = parse_platform_sku(sku_full)
     if not base_sku:
@@ -501,13 +513,7 @@ def keep_only_changed_rows_in_place(ws, data_start_row: int, changed_row_numbers
         if r not in keep:
             ws.delete_rows(r, 1)
 
-def build_output_workbook_coret(
-    tpl: TemplateProfile,
-    rows: List[Dict[str, object]],
-) -> Workbook:
-    """
-    rows: list of {"product_id": str, "sku_id": str, "price": int}
-    """
+def build_output_workbook_coret(tpl: TemplateProfile, rows: List[Dict[str, object]]) -> Workbook:
     wb = Workbook()
     ws = wb.active
     ws.title = "Sheet1"
@@ -543,11 +549,7 @@ tpl = tpl_map[tpl_label]
 
 c1, c2, c3 = st.columns(3)
 with c1:
-    mass_files = st.file_uploader(
-        "Upload file input (bisa banyak)",
-        type=["xlsx"],
-        accept_multiple_files=True,
-    )
+    mass_files = st.file_uploader("Upload file input (bisa banyak)", type=["xlsx"], accept_multiple_files=True)
 with c2:
     pl_file = st.file_uploader("Upload Pricelist (fixed)", type=["xlsx"])
 with c3:
@@ -599,20 +601,20 @@ if process:
                 ws_in,
                 sku_candidates=tpl.sku_headers,
                 price_candidates=tpl.input_price_headers,
-                scan_rows=60,
+                scan_rows=80,
             )
         except Exception as e:
             changed_rows.append(RowChange(
-                file=filename,
-                excel_row=0,
-                sku_full="",
-                old_price=0,
-                new_price=0,
+                file=filename, excel_row=0, sku_full="", old_price=0, new_price=0,
                 reason=f"Gagal detect header/data start: {e}",
             ))
             continue
 
-        product_col = find_optional_col_on_header_row(ws_in, header_row, tpl.input_product_headers)
+        product_col = None
+        if tpl.input_product_id_col_index:
+            product_col = tpl.input_product_id_col_index
+        else:
+            product_col = find_optional_col_on_header_row(ws_in, header_row, tpl.input_product_headers)
 
         # ============ MODE: INPLACE ============
         if tpl.mode_output == "inplace":
@@ -635,29 +637,20 @@ if process:
                     price_key=price_key_ui,
                 )
 
-                if new_price is None:
-                    continue
-                if int(new_price) == int(old_price):
+                if new_price is None or int(new_price) == int(old_price):
                     continue
 
                 safe_set_cell_value(ws_in, row=r, col=in_price_col, value=int(new_price))
                 changed_row_numbers.append(r)
 
                 changed_rows.append(RowChange(
-                    file=filename,
-                    excel_row=r,
-                    sku_full=sku_full,
-                    old_price=int(old_price),
-                    new_price=int(new_price),
+                    file=filename, excel_row=r, sku_full=sku_full,
+                    old_price=int(old_price), new_price=int(new_price),
                     reason=f"[{tpl.key}] {reason}",
                 ))
 
             if changed_row_numbers:
-                keep_only_changed_rows_in_place(
-                    ws_in,
-                    data_start_row=data_start_row,
-                    changed_row_numbers=changed_row_numbers,
-                )
+                keep_only_changed_rows_in_place(ws_in, data_start_row, changed_row_numbers)
                 out_bytes = workbook_to_bytes(wb_in)
                 out_name = filename.replace(".xlsx", f"_changed_only_{price_key_ui}.xlsx")
                 output_files.append((out_name, out_bytes))
@@ -667,8 +660,9 @@ if process:
             rows_for_output: List[Dict[str, object]] = []
 
             for r in range(data_start_row, ws_in.max_row + 1):
-                sku_val = ws_in.cell(row=r, column=sku_col).value
-                sku_full = parse_number_like_id(sku_val)
+                # base sku_full tetap dari kolom "SKU Penjual" (karena sku_penjual dipakai untuk lookup pricelist+addon)
+                sku_penjual_val = ws_in.cell(row=r, column=sku_col).value
+                sku_full = parse_number_like_id(sku_penjual_val)
                 if not sku_full:
                     continue
 
@@ -682,10 +676,14 @@ if process:
                     discount_rp=int(discount_rp),
                     price_key=price_key_ui,
                 )
-                if new_price is None:
+                if new_price is None or int(new_price) == int(old_price):
                     continue
-                if int(new_price) == int(old_price):
-                    continue
+
+                # ✅ SKU_id output: kalau template pakai input_sku_id_col_index, ambil dari kolom itu (kolom D)
+                if tpl.input_sku_id_col_index:
+                    sku_id = parse_number_like_id(ws_in.cell(row=r, column=tpl.input_sku_id_col_index).value)
+                else:
+                    sku_id = sku_full  # fallback: pakai SKU Penjual
 
                 product_id = ""
                 if product_col is not None:
@@ -693,17 +691,14 @@ if process:
 
                 rows_for_output.append({
                     "product_id": product_id,
-                    "sku_id": sku_full,
+                    "sku_id": sku_id,
                     "price": int(new_price),
                 })
 
                 changed_rows.append(RowChange(
-                    file=filename,
-                    excel_row=r,
-                    sku_full=sku_full,
-                    old_price=int(old_price),
-                    new_price=int(new_price),
-                    reason=f"[{tpl.key}] {reason}",
+                    file=filename, excel_row=r, sku_full=sku_full,
+                    old_price=int(old_price), new_price=int(new_price),
+                    reason=f"[{tpl.key}] {reason} | sku_id_from={'col'+str(tpl.input_sku_id_col_index) if tpl.input_sku_id_col_index else 'SKU Penjual'}",
                 ))
 
             if rows_for_output:
