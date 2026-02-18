@@ -10,14 +10,27 @@ from openpyxl.cell.cell import MergedCell
 
 
 # =========================
-# Helpers
+# Config / Constants
 # =========================
 SKU_SPLIT_PLUS = re.compile(r"\+")
 
 SMALL_TO_THOUSAND_THRESHOLD = 1_000_000
 AUTO_MULTIPLIER_FOR_SMALL = 1000
 
+# Pricelist: header minimal yang kita cari
+PL_HEADER_SKU_CANDIDATES = ["KODEBARANG", "KODE BARANG", "SKU", "SKU NO", "SKU_NO", "KODEBARANG "]
+PRICELIST_HEADER_ROW_FIXED = 2
+PL_PRICE_COL_TIKTOK = "M3"
+PL_PRICE_COL_SHOPEE = "M4"
 
+# Addon mapping: header yang diharapkan (boleh lebih dari 1 kandidat)
+ADDON_CODE_CANDIDATES = ["addon_code", "ADDON_CODE", "Addon Code", "Kode", "KODE", "KODE ADDON", "KODE_ADDON"]
+ADDON_PRICE_CANDIDATES = ["harga", "HARGA", "Price", "PRICE", "Harga"]
+
+
+# =========================
+# Utils
+# =========================
 def normalize_text(x) -> str:
     return "" if x is None else str(x).strip()
 
@@ -107,11 +120,50 @@ def safe_set_cell_value(ws, row: int, col: int, value):
     cell.value = value
 
 
+def workbook_to_bytes(wb) -> bytes:
+    out = io.BytesIO()
+    wb.save(out)
+    return out.getvalue()
+
+
 # =========================
-# Dynamic header scan
+# Dynamic header scan (lebih robust)
 # =========================
 def _norm(x) -> str:
-    return "" if x is None else str(x).strip().lower()
+    """Normalize header cell text: tahan newline, spasi ganda, dll."""
+    if x is None:
+        return ""
+    s = str(x)
+    s = s.replace("\n", " ")
+    s = re.sub(r"\s+", " ", s)  # collapse spasi/tab/newline
+    return s.strip().lower()
+
+
+def _match_col(lower_to_col: Dict[str, int], candidates: List[str]) -> Optional[int]:
+    """Cari kolom berdasarkan kandidat header:
+    1) exact match
+    2) contains match (header ada tambahan kata seperti '(Optional)')
+    """
+    if not candidates:
+        return None
+
+    # exact
+    for cand in candidates:
+        c = _norm(cand)
+        if c in lower_to_col:
+            return lower_to_col[c]
+
+    # contains
+    keys = list(lower_to_col.keys())
+    for cand in candidates:
+        c = _norm(cand)
+        if not c:
+            continue
+        for k in keys:
+            if c in k or k in c:
+                return lower_to_col[k]
+
+    return None
 
 
 def find_header_cols_and_data_start(
@@ -123,8 +175,6 @@ def find_header_cols_and_data_start(
     """
     Return: (header_row, sku_col, price_col, data_start_row)
     """
-    sku_candidates_l = [s.strip().lower() for s in sku_candidates]
-    price_candidates_l = [p.strip().lower() for p in price_candidates]
     max_r = min(scan_rows, ws.max_row)
 
     for r in range(1, max_r + 1):
@@ -134,8 +184,8 @@ def find_header_cols_and_data_start(
             if v and v not in lower_to_col:
                 lower_to_col[v] = c
 
-        sku_col = next((lower_to_col.get(s) for s in sku_candidates_l if s in lower_to_col), None)
-        price_col = next((lower_to_col.get(p) for p in price_candidates_l if p in lower_to_col), None)
+        sku_col = _match_col(lower_to_col, sku_candidates)
+        price_col = _match_col(lower_to_col, price_candidates)
 
         if sku_col and price_col:
             # detect first data row
@@ -155,7 +205,6 @@ def find_header_cols_and_data_start(
 def find_col_on_header_row(ws, header_row: int, candidates: Optional[List[str]]) -> Optional[int]:
     if not candidates:
         return None
-    candidates_l = [c.strip().lower() for c in candidates]
 
     lower_to_col: Dict[str, int] = {}
     for c in range(1, ws.max_column + 1):
@@ -163,40 +212,23 @@ def find_col_on_header_row(ws, header_row: int, candidates: Optional[List[str]])
         if v and v not in lower_to_col:
             lower_to_col[v] = c
 
-    for cand in candidates_l:
-        if cand in lower_to_col:
-            return lower_to_col[cand]
-    return None
+    return _match_col(lower_to_col, candidates)
 
 
 # =========================
-# Pricelist & Addon mapping
+# Pricelist & Addon
 # =========================
-PL_HEADER_SKU_CANDIDATES = ["KODEBARANG", "KODE BARANG", "SKU", "SKU NO", "SKU_NO", "KODEBARANG "]
-PRICELIST_HEADER_ROW_FIXED = 2
-PL_PRICE_COL_TIKTOK = "M3"
-PL_PRICE_COL_SHOPEE = "M4"
-
-ADDON_CODE_CANDIDATES = ["addon_code", "ADDON_CODE", "Addon Code", "Kode", "KODE", "KODE ADDON", "KODE_ADDON"]
-ADDON_PRICE_CANDIDATES = ["harga", "HARGA", "Price", "PRICE", "Harga"]
-
-
 def find_header_row_and_cols_pricelist(ws) -> Tuple[int, int, int, int]:
     r = PRICELIST_HEADER_ROW_FIXED
-    candidates = [c.strip().lower() for c in PL_HEADER_SKU_CANDIDATES]
-    target_m3 = PL_PRICE_COL_TIKTOK.lower()
-    target_m4 = PL_PRICE_COL_SHOPEE.lower()
+    candidates = [_norm(c) for c in PL_HEADER_SKU_CANDIDATES]
+    target_m3 = _norm(PL_PRICE_COL_TIKTOK)
+    target_m4 = _norm(PL_PRICE_COL_SHOPEE)
 
-    row_vals = []
+    lower_to_col: Dict[str, int] = {}
     for c in range(1, ws.max_column + 1):
-        v = ws.cell(row=r, column=c).value
-        row_vals.append("" if v is None else str(v).strip())
-
-    lower_to_col = {}
-    for idx, v in enumerate(row_vals, start=1):
-        lv = v.strip().lower()
-        if lv and lv not in lower_to_col:
-            lower_to_col[lv] = idx
+        v = _norm(ws.cell(row=r, column=c).value)
+        if v and v not in lower_to_col:
+            lower_to_col[v] = c
 
     sku_col = None
     for cand in candidates:
@@ -227,6 +259,7 @@ def load_pricelist_map(pl_bytes: bytes) -> Dict[str, Dict[str, int]]:
 
         m3_raw = parse_price_cell(ws.cell(row=r, column=m3_col).value)
         m4_raw = parse_price_cell(ws.cell(row=r, column=m4_col).value)
+
         if m3_raw is None and m4_raw is None:
             continue
 
@@ -247,11 +280,11 @@ def load_addon_map(addon_bytes: bytes) -> Dict[str, int]:
     code_col = None
     price_col = None
 
-    code_cands = [c.strip().lower() for c in ADDON_CODE_CANDIDATES]
-    price_cands = [c.strip().lower() for c in ADDON_PRICE_CANDIDATES]
+    code_cands = [_norm(c) for c in ADDON_CODE_CANDIDATES]
+    price_cands = [_norm(c) for c in ADDON_PRICE_CANDIDATES]
 
-    for r in range(1, 40):
-        lower_to_col = {}
+    for r in range(1, 50):
+        lower_to_col: Dict[str, int] = {}
         for c in range(1, ws.max_column + 1):
             v = _norm(ws.cell(row=r, column=c).value)
             if v and v not in lower_to_col:
@@ -283,7 +316,7 @@ def load_addon_map(addon_bytes: bytes) -> Dict[str, int]:
 
 
 # =========================
-# Pricing compute
+# Core compute
 # =========================
 @dataclass
 class RowChange:
@@ -317,6 +350,8 @@ def compute_new_price_for_row(
     addon_total = 0
     for a in addons:
         code = normalize_addon_code(a)
+        if not code:
+            continue
         if code not in addon_map:
             return None, f"Addon '{code}' tidak ada di file Addon Mapping"
         addon_total += int(addon_map[code])
@@ -326,12 +361,6 @@ def compute_new_price_for_row(
         final_price = 0
 
     return final_price, f"{price_key} + addon - diskon"
-
-
-def workbook_to_bytes(wb) -> bytes:
-    out = io.BytesIO()
-    wb.save(out)
-    return out.getvalue()
 
 
 def keep_only_changed_rows_in_place(ws, data_start_row: int, changed_row_numbers: List[int]):
@@ -352,7 +381,7 @@ def make_report_workbook(changes: List[RowChange]) -> bytes:
 
 
 # =========================
-# Template Profiles (sesuai requirement kamu)
+# Template Profiles (sesuai penjelasan kamu)
 # =========================
 @dataclass
 class TemplateProfile:
@@ -365,7 +394,7 @@ class TemplateProfile:
     sku_headers: List[str]
     price_headers: List[str]
 
-    # diskon/generate only: ambil ID produk & ID SKU dari header input
+    # generate only: ambil ID produk & ID SKU dari header input
     product_id_headers: Optional[List[str]] = None
     sku_id_headers: Optional[List[str]] = None
 
@@ -375,17 +404,58 @@ class TemplateProfile:
     out_price_header: Optional[str] = None
 
 
-# === Header sesuai penjelasan user ===
-HDR_TT_PM_SKU = ["SKU Penjual"]
-HDR_TT_PM_PRICE = ["Harga Ritel (Mata Uang Lokal)"]
+# INPUT HEADER sesuai requirement kamu:
+# - TikTok normal & PM normal: "SKU Penjual", "harga ritel (mata uang lokal)"
+HDR_TT_PM_SKU = ["SKU Penjual", "Sku Penjual", "Seller SKU"]
+HDR_TT_PM_PRICE = [
+    "Harga Ritel (Mata Uang Lokal)",
+    "harga ritel (mata uang lokal)",
+    "Harga Ritel",
+    "harga ritel",
+]
 
-HDR_SHOPEE_SKU = ["SKU"]
-HDR_SHOPEE_PRICE = ["harga", "Harga"]
+# - Shopee normal: "SKU", "harga"
+HDR_SHOPEE_NORMAL_SKU = ["SKU", "Sku"]
+HDR_SHOPEE_NORMAL_PRICE = ["harga", "Harga", "price", "Price"]
 
-# ID headers (diskon/coret)
-HDR_PRODUCT_ID = ["ID produk", "ID Produk", "ID Produk (wajib)", "produk_id", "Product_id", "Product ID", "ID Product"]
-HDR_SKU_ID = ["ID SKU", "ID SKU (wajib)", "SKU_id", "SKU ID", "ID varian", "ID Varian"]
+# Shopee diskon (template sering beda; dibuat lebih gemuk)
+HDR_SHOPEE_DISKON_SKU = [
+    "SKU",
+    "SKU Penjual",
+    "SKU Ref. No.(Optional)",
+    "SKU Ref. No. (Optional)",
+    "SKU Ref No",
+    "Seller SKU",
+]
+HDR_SHOPEE_DISKON_PRICE = [
+    "harga",
+    "Harga",
+    "Harga diskon",
+    "Harga Diskon",
+    "Discount Price",
+    "Harga Ritel (Mata Uang Lokal)",
+]
 
+# ID headers (untuk output 3 kolom)
+HDR_PRODUCT_ID = [
+    "ID produk",
+    "ID Produk",
+    "ID Produk (wajib)",
+    "produk_id",
+    "Product_id",
+    "Product ID",
+    "ID Product",
+]
+HDR_SKU_ID = [
+    "ID SKU",
+    "ID SKU (wajib)",
+    "SKU_id",
+    "SKU ID",
+    "ID varian",
+    "ID Varian",
+    "Variant ID",
+    "ID Variasi",
+]
 
 TEMPLATES: List[TemplateProfile] = [
     TemplateProfile(
@@ -401,8 +471,8 @@ TEMPLATES: List[TemplateProfile] = [
         label="Normal Shopee (pakai M4)",
         mode_output="inplace",
         default_price_key="M4",
-        sku_headers=HDR_SHOPEE_SKU,
-        price_headers=HDR_SHOPEE_PRICE,
+        sku_headers=HDR_SHOPEE_NORMAL_SKU,
+        price_headers=HDR_SHOPEE_NORMAL_PRICE,
     ),
     TemplateProfile(
         key="NORMAL_PM",
@@ -415,12 +485,12 @@ TEMPLATES: List[TemplateProfile] = [
 
     # Diskon/Coret TikTok: output 3 kolom wajib
     TemplateProfile(
-        key="DISKON_TIKTOK",
+        key="CORET_TIKTOK",
         label="Diskon / Harga Coret TikTok (pakai M3) - output beda",
         mode_output="generate",
         default_price_key="M3",
-        sku_headers=HDR_TT_PM_SKU,         # untuk lookup harga: SKU Penjual (yang ada addon)
-        price_headers=HDR_TT_PM_PRICE,     # old price di file input
+        sku_headers=HDR_TT_PM_SKU,
+        price_headers=HDR_TT_PM_PRICE,
         product_id_headers=HDR_PRODUCT_ID,
         sku_id_headers=HDR_SKU_ID,
         out_product_header="produk_id (wajib)",
@@ -428,20 +498,20 @@ TEMPLATES: List[TemplateProfile] = [
         out_price_header="Harga Penawaran (wajib)",
     ),
 
-    # Diskon/Coret Shopee: dari requirement kamu output sama (SKU Penjual & harga ritel)
-    # -> paling aman kita treat inplace (edit harga) supaya output header tetap sama seperti input.
+    # Diskon/Coret Shopee: sesuai penjelasan kamu -> output sama (SKU Penjual + harga ritel)
+    # Jadi kita proses "inplace" saja.
     TemplateProfile(
-        key="DISKON_SHOPEE",
+        key="CORET_SHOPEE",
         label="Diskon / Harga Coret Shopee (pakai M4) - output beda",
         mode_output="inplace",
         default_price_key="M4",
-        sku_headers=HDR_TT_PM_SKU,
-        price_headers=HDR_TT_PM_PRICE,
+        sku_headers=HDR_SHOPEE_DISKON_SKU,
+        price_headers=HDR_SHOPEE_DISKON_PRICE,
     ),
 
     # Diskon/Coret PM: output 3 kolom wajib
     TemplateProfile(
-        key="DISKON_PM",
+        key="CORET_PM",
         label="Diskon / Harga Coret PM (pakai M4) - output beda",
         mode_output="generate",
         default_price_key="M4",
@@ -531,13 +601,13 @@ if process:
         wb_in = load_workbook(io.BytesIO(mf.getvalue()))
         ws_in = wb_in.active
 
-        # detect header + data start (dynamic)
+        # detect header + data start (dynamic robust)
         try:
             header_row, sku_col, price_col, data_start_row = find_header_cols_and_data_start(
                 ws_in,
                 sku_candidates=tpl.sku_headers,
                 price_candidates=tpl.price_headers,
-                scan_rows=120,
+                scan_rows=160,
             )
         except Exception as e:
             changed_rows.append(RowChange(
@@ -659,7 +729,7 @@ if process:
             "new_price": x.new_price,
             "reason": x.reason,
         } for x in changed_rows])
-        st.dataframe(df_preview.head(300), use_container_width=True)
+        st.dataframe(df_preview.head(500), use_container_width=True)
 
     st.divider()
 
