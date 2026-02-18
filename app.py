@@ -32,6 +32,22 @@ SKU_SPLIT_PLUS = re.compile(r"\+")
 
 
 # =========================
+# Header panjang (sesuai template Diskon/Coret)
+# =========================
+CORET_EXTRA_TOTAL_STOK_HEADER = (
+    "Total Stok Promosi (opsional)\n"
+    "1. Total Stok Promosi≤ Stok \n"
+    "2. Jika tidak diisi artinya tidak terbatas"
+)
+
+CORET_EXTRA_BATAS_BELI_HEADER = (
+    "Batas Pembelian (opsional)\n"
+    "1. 1 ≤ Batas pembelian≤ 99\n"
+    "2. Jika tidak diisi artinya tidak terbatas"
+)
+
+
+# =========================
 # Template profiles
 # =========================
 @dataclass
@@ -49,6 +65,7 @@ class TemplateProfile:
     out_sku_header: Optional[str] = None
     out_price_header: Optional[str] = None
     out_extra_headers: Optional[List[str]] = None       # headers lain di output (boleh kosong)
+
 
 TEMPLATES: List[TemplateProfile] = [
     TemplateProfile(
@@ -75,52 +92,66 @@ TEMPLATES: List[TemplateProfile] = [
         sku_headers=[MASS_HEADER_SKU],
         input_price_headers=[MASS_HEADER_PRICE],
     ),
+
+    # ====== CORET (OUTPUT BEDA) ======
     TemplateProfile(
         key="CORET_TIKTOK",
-        label="Harga Coret TikTok (pakai M3)",
+        label="Diskon / Harga Coret TikTok (pakai M3) - output beda",
         mode_output="generate",
         default_price_key="M3",
         sku_headers=[MASS_HEADER_SKU],
         input_price_headers=[MASS_HEADER_PRICE],
-        input_product_headers=["ID Produk", "ID Produk (wajib)", "Product_id", "Product ID", "Product_id (wajib)", "Product_id(wajib)"],
+        input_product_headers=[
+            "ID Produk", "ID Produk (wajib)",
+            "Product_id", "Product ID",
+            "Product_id (wajib)", "Product_id(wajib)"
+        ],
         out_product_header="Product_id (wajib)",
         out_sku_header="SKU_id (wajib)",
         out_price_header="Harga Penawaran (wajib)",
         out_extra_headers=[
-            "Total Stok Promosi (opsional)",
-            "Batas Pembelian (opsional)",
+            CORET_EXTRA_TOTAL_STOK_HEADER,
+            CORET_EXTRA_BATAS_BELI_HEADER,
         ],
     ),
     TemplateProfile(
         key="CORET_SHOPEE",
-        label="Harga Coret Shopee (pakai M4)",
+        label="Diskon / Harga Coret Shopee (pakai M4) - output beda",
         mode_output="generate",
         default_price_key="M4",
         sku_headers=[MASS_HEADER_SKU],
         input_price_headers=[MASS_HEADER_PRICE],
-        input_product_headers=["ID Produk", "ID Produk (wajib)", "Product_id", "Product ID", "Product_id (wajib)", "Product_id(wajib)"],
+        input_product_headers=[
+            "ID Produk", "ID Produk (wajib)",
+            "Product_id", "Product ID",
+            "Product_id (wajib)", "Product_id(wajib)"
+        ],
         out_product_header="Product_id (wajib)",
         out_sku_header="SKU_id (wajib)",
         out_price_header="Harga Penawaran (wajib)",
         out_extra_headers=[
-            "Total Stok Promosi (opsional)",
-            "Batas Pembelian (opsional)",
+            CORET_EXTRA_TOTAL_STOK_HEADER,
+            CORET_EXTRA_BATAS_BELI_HEADER,
         ],
     ),
     TemplateProfile(
         key="CORET_PM",
-        label="Harga Coret PM (pakai M4)",
+        label="Diskon / Harga Coret PM (pakai M4) - output beda",
         mode_output="generate",
         default_price_key="M4",
         sku_headers=[MASS_HEADER_SKU],
         input_price_headers=[MASS_HEADER_PRICE],
-        input_product_headers=["ID Produk", "ID Produk (wajib)", "Product_id", "Product ID", "Product_id (wajib)", "Product_id(wajib)"],
+        input_product_headers=[
+            "ID Produk", "ID Produk (wajib)",
+            "Product_id", "Product ID",
+            "Product_id (wajib)", "Product_id(wajib)"
+        ],
         out_product_header="Product_id (wajib)",
         out_sku_header="SKU_id (wajib)",
         out_price_header="Harga Penawaran (wajib)",
         out_extra_headers=[
-            "Total Stok Promosi (opsional)",
-            "Batas Pembelian (opsional)",
+            CORET_EXTRA_TOTAL_STOK_HEADER,
+            CORET_EXTRA_BATAS_BELI_HEADER,
         ],
     ),
 ]
@@ -221,7 +252,7 @@ def find_header_cols_and_data_start(
     ws,
     sku_candidates: List[str],
     price_candidates: List[str],
-    scan_rows: int = 40,
+    scan_rows: int = 50,
 ) -> Tuple[int, int, int, int]:
     """
     Return: (header_row, sku_col, price_col, data_start_row)
@@ -485,10 +516,8 @@ def build_output_workbook_coret(
     if tpl.out_extra_headers:
         headers.extend(tpl.out_extra_headers)
 
-    # header row 1
     ws.append(headers)
 
-    # data rows
     for r in rows:
         product_id = r.get("product_id", "")
         sku_id = r.get("sku_id", "")
@@ -496,7 +525,7 @@ def build_output_workbook_coret(
 
         line = [product_id, sku_id, price]
         if tpl.out_extra_headers:
-            line.extend(["" for _ in tpl.out_extra_headers])  # kosongkan kolom opsional
+            line.extend(["" for _ in tpl.out_extra_headers])
         ws.append(line)
 
     return wb
@@ -565,13 +594,12 @@ if process:
         wb_in = load_workbook(io.BytesIO(mf.getvalue()))
         ws_in = wb_in.active
 
-        # detect header + data start (dynamic)
         try:
             header_row, sku_col, in_price_col, data_start_row = find_header_cols_and_data_start(
                 ws_in,
                 sku_candidates=tpl.sku_headers,
                 price_candidates=tpl.input_price_headers,
-                scan_rows=50,
+                scan_rows=60,
             )
         except Exception as e:
             changed_rows.append(RowChange(
@@ -634,7 +662,7 @@ if process:
                 out_name = filename.replace(".xlsx", f"_changed_only_{price_key_ui}.xlsx")
                 output_files.append((out_name, out_bytes))
 
-        # ============ MODE: GENERATE (CORET) ============
+        # ============ MODE: GENERATE (CORET/DISKON) ============
         else:
             rows_for_output: List[Dict[str, object]] = []
 
@@ -644,7 +672,6 @@ if process:
                 if not sku_full:
                     continue
 
-                # old_price dari input price column (buat compare/skip)
                 old_price_raw = parse_price_cell(ws_in.cell(row=r, column=in_price_col).value)
                 old_price = int(old_price_raw) if old_price_raw is not None else 0
 
@@ -660,7 +687,6 @@ if process:
                 if int(new_price) == int(old_price):
                     continue
 
-                # coba ambil product_id dari input kalau ada
                 product_id = ""
                 if product_col is not None:
                     product_id = parse_number_like_id(ws_in.cell(row=r, column=product_col).value)
@@ -736,4 +762,3 @@ if process:
             file_name="changes_report.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
-
