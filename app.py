@@ -53,7 +53,7 @@ class TemplateProfile:
 TEMPLATES: List[TemplateProfile] = [
     TemplateProfile(
         key="NORMAL_TIKTOK",
-        label="Normal TikTok (input=output, pakai M3)",
+        label="Normal TikTok (pakai M3)",
         mode_output="inplace",
         default_price_key="M3",
         sku_headers=[MASS_HEADER_SKU],
@@ -61,7 +61,7 @@ TEMPLATES: List[TemplateProfile] = [
     ),
     TemplateProfile(
         key="NORMAL_SHOPEE",
-        label="Normal Shopee (input=output, pakai M4)",
+        label="Normal Shopee (pakai M4)",
         mode_output="inplace",
         default_price_key="M4",
         sku_headers=[MASS_HEADER_SKU],
@@ -69,7 +69,7 @@ TEMPLATES: List[TemplateProfile] = [
     ),
     TemplateProfile(
         key="NORMAL_POWERMERCHANT",
-        label="Normal PowerMerchant (input=output, pakai M3)",
+        label="Normal PowerMerchant (pakai M3)",
         mode_output="inplace",
         default_price_key="M3",
         sku_headers=[MASS_HEADER_SKU],
@@ -77,7 +77,7 @@ TEMPLATES: List[TemplateProfile] = [
     ),
     TemplateProfile(
         key="CORET_TIKTOK",
-        label="Harga Coret TikTok (output beda, pakai M3)",
+        label="Harga Coret TikTok (pakai M3)",
         mode_output="generate",
         default_price_key="M3",
         sku_headers=[MASS_HEADER_SKU],
@@ -93,7 +93,7 @@ TEMPLATES: List[TemplateProfile] = [
     ),
     TemplateProfile(
         key="CORET_SHOPEE",
-        label="Harga Coret Shopee (output beda, pakai M4)",
+        label="Harga Coret Shopee (pakai M4)",
         mode_output="generate",
         default_price_key="M4",
         sku_headers=[MASS_HEADER_SKU],
@@ -720,3 +720,4 @@ if process:
             file_name="changes_report.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
+
