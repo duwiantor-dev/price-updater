@@ -57,12 +57,18 @@ class TemplateProfile:
     mode_output: str            # "inplace" | "generate"
     default_price_key: str      # "M3" | "M4"
 
-    # input header candidates (dipakai untuk cari header row + kolom harga)
+    # input header candidates (dipakai untuk cari header row + kolom sku/price jika tidak pakai fixed index)
     sku_headers: List[str]
     input_price_headers: List[str]
 
-    # khusus: kalau ID SKU ada di kolom tertentu (mis. kolom D = 4) → pakai ini saat output generate
+    # khusus: kalau output SKU_id (wajib) harus ambil dari kolom tertentu (mis. kolom D = 4)
     input_sku_id_col_index: Optional[int] = None
+
+    # khusus: kalau sku_full (buat lookup pricelist) harus ambil dari kolom tertentu (mis. Shopee coret = kolom F)
+    input_sku_full_col_index: Optional[int] = None
+
+    # khusus: kalau old_price input ambil dari kolom tertentu (mis. Shopee coret = kolom H)
+    input_old_price_col_index: Optional[int] = None
 
     # product_id bisa dari header atau fixed col index (opsional)
     input_product_headers: Optional[List[str]] = None
@@ -102,15 +108,15 @@ TEMPLATES: List[TemplateProfile] = [
     ),
 
     # ====== CORET / DISKON (OUTPUT BEDA) ======
-    # NOTE: khusus TikTok & PM -> SKU_id(wajib) = ID SKU di kolom D input (index 4)
+    # TikTok & PM: SKU_id(wajib) = ID SKU di kolom D input (index 4)
     TemplateProfile(
         key="CORET_TIKTOK",
         label="Diskon / Harga Coret TikTok (pakai M3) - output beda",
         mode_output="generate",
         default_price_key="M3",
-        sku_headers=[MASS_HEADER_SKU],                  # untuk deteksi header row & data start
+        sku_headers=[MASS_HEADER_SKU],
         input_price_headers=[MASS_HEADER_PRICE],
-        input_sku_id_col_index=4,                       # ✅ kolom D
+        input_sku_id_col_index=4,  # kolom D
         input_product_headers=[
             "ID Produk", "ID Produk (wajib)",
             "Product_id", "Product ID",
@@ -119,19 +125,19 @@ TEMPLATES: List[TemplateProfile] = [
         out_product_header="Product_id (wajib)",
         out_sku_header="SKU_id (wajib)",
         out_price_header="Harga Penawaran (wajib)",
-        out_extra_headers=[
-            CORET_EXTRA_TOTAL_STOK_HEADER,
-            CORET_EXTRA_BATAS_BELI_HEADER,
-        ],
+        out_extra_headers=[CORET_EXTRA_TOTAL_STOK_HEADER, CORET_EXTRA_BATAS_BELI_HEADER],
     ),
+
+    # Shopee coret: SKU lookup = kolom F, old price = kolom H
     TemplateProfile(
         key="CORET_SHOPEE",
         label="Diskon / Harga Coret Shopee (pakai M4) - output beda",
         mode_output="generate",
         default_price_key="M4",
-        sku_headers=[MASS_HEADER_SKU],
-        input_price_headers=[MASS_HEADER_PRICE],
-        # Shopee coret masih pakai SKU Penjual sebagai sku_id (kalau nanti ternyata beda, tinggal set input_sku_id_col_index juga)
+        sku_headers=["SKU Ref. No.(Optional)"],
+        input_price_headers=["Harga diskon"],
+        input_sku_full_col_index=6,   # kolom F
+        input_old_price_col_index=8,  # kolom H
         input_product_headers=[
             "ID Produk", "ID Produk (wajib)",
             "Product_id", "Product ID",
@@ -140,11 +146,9 @@ TEMPLATES: List[TemplateProfile] = [
         out_product_header="Product_id (wajib)",
         out_sku_header="SKU_id (wajib)",
         out_price_header="Harga Penawaran (wajib)",
-        out_extra_headers=[
-            CORET_EXTRA_TOTAL_STOK_HEADER,
-            CORET_EXTRA_BATAS_BELI_HEADER,
-        ],
+        out_extra_headers=[CORET_EXTRA_TOTAL_STOK_HEADER, CORET_EXTRA_BATAS_BELI_HEADER],
     ),
+
     TemplateProfile(
         key="CORET_PM",
         label="Diskon / Harga Coret PM (pakai M4) - output beda",
@@ -152,7 +156,7 @@ TEMPLATES: List[TemplateProfile] = [
         default_price_key="M4",
         sku_headers=[MASS_HEADER_SKU],
         input_price_headers=[MASS_HEADER_PRICE],
-        input_sku_id_col_index=4,                       # ✅ kolom D
+        input_sku_id_col_index=4,  # kolom D
         input_product_headers=[
             "ID Produk", "ID Produk (wajib)",
             "Product_id", "Product ID",
@@ -161,10 +165,7 @@ TEMPLATES: List[TemplateProfile] = [
         out_product_header="Product_id (wajib)",
         out_sku_header="SKU_id (wajib)",
         out_price_header="Harga Penawaran (wajib)",
-        out_extra_headers=[
-            CORET_EXTRA_TOTAL_STOK_HEADER,
-            CORET_EXTRA_BATAS_BELI_HEADER,
-        ],
+        out_extra_headers=[CORET_EXTRA_TOTAL_STOK_HEADER, CORET_EXTRA_BATAS_BELI_HEADER],
     ),
 ]
 
@@ -264,7 +265,7 @@ def find_header_cols_and_data_start(
     ws,
     sku_candidates: List[str],
     price_candidates: List[str],
-    scan_rows: int = 60,
+    scan_rows: int = 80,
 ) -> Tuple[int, int, int, int]:
     """
     Return: (header_row, sku_col, price_col, data_start_row)
@@ -596,12 +597,13 @@ if process:
         wb_in = load_workbook(io.BytesIO(mf.getvalue()))
         ws_in = wb_in.active
 
+        # detect header + data start (dynamic)
         try:
             header_row, sku_col, in_price_col, data_start_row = find_header_cols_and_data_start(
                 ws_in,
                 sku_candidates=tpl.sku_headers,
                 price_candidates=tpl.input_price_headers,
-                scan_rows=80,
+                scan_rows=120,
             )
         except Exception as e:
             changed_rows.append(RowChange(
@@ -610,7 +612,7 @@ if process:
             ))
             continue
 
-        product_col = None
+        # product_id column
         if tpl.input_product_id_col_index:
             product_col = tpl.input_product_id_col_index
         else:
@@ -660,13 +662,16 @@ if process:
             rows_for_output: List[Dict[str, object]] = []
 
             for r in range(data_start_row, ws_in.max_row + 1):
-                # base sku_full tetap dari kolom "SKU Penjual" (karena sku_penjual dipakai untuk lookup pricelist+addon)
-                sku_penjual_val = ws_in.cell(row=r, column=sku_col).value
-                sku_full = parse_number_like_id(sku_penjual_val)
+                # sku_full untuk lookup (bisa fixed col untuk Shopee coret)
+                sku_full_col = tpl.input_sku_full_col_index or sku_col
+                sku_full_val = ws_in.cell(row=r, column=sku_full_col).value
+                sku_full = parse_number_like_id(sku_full_val)
                 if not sku_full:
                     continue
 
-                old_price_raw = parse_price_cell(ws_in.cell(row=r, column=in_price_col).value)
+                # old price bisa fixed col untuk Shopee coret
+                old_price_col = tpl.input_old_price_col_index or in_price_col
+                old_price_raw = parse_price_cell(ws_in.cell(row=r, column=old_price_col).value)
                 old_price = int(old_price_raw) if old_price_raw is not None else 0
 
                 new_price, reason = compute_new_price_for_row(
@@ -679,11 +684,11 @@ if process:
                 if new_price is None or int(new_price) == int(old_price):
                     continue
 
-                # ✅ SKU_id output: kalau template pakai input_sku_id_col_index, ambil dari kolom itu (kolom D)
+                # output sku_id: kalau ada mapping khusus (TikTok/PM), ambil dari kolom D
                 if tpl.input_sku_id_col_index:
                     sku_id = parse_number_like_id(ws_in.cell(row=r, column=tpl.input_sku_id_col_index).value)
                 else:
-                    sku_id = sku_full  # fallback: pakai SKU Penjual
+                    sku_id = sku_full
 
                 product_id = ""
                 if product_col is not None:
@@ -698,7 +703,7 @@ if process:
                 changed_rows.append(RowChange(
                     file=filename, excel_row=r, sku_full=sku_full,
                     old_price=int(old_price), new_price=int(new_price),
-                    reason=f"[{tpl.key}] {reason} | sku_id_from={'col'+str(tpl.input_sku_id_col_index) if tpl.input_sku_id_col_index else 'SKU Penjual'}",
+                    reason=f"[{tpl.key}] {reason}",
                 ))
 
             if rows_for_output:
