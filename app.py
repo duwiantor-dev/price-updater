@@ -53,7 +53,7 @@ class TemplateProfile:
 TEMPLATES: List[TemplateProfile] = [
     TemplateProfile(
         key="NORMAL_TIKTOK",
-        label="Normal TikTok (input=output, pakai M3)",
+        label="Normal TikTok (pakai M3)",
         mode_output="inplace",
         default_price_key="M3",
         sku_headers=[MASS_HEADER_SKU],
@@ -61,23 +61,23 @@ TEMPLATES: List[TemplateProfile] = [
     ),
     TemplateProfile(
         key="NORMAL_SHOPEE",
-        label="Normal Shopee (input=output, pakai M4)",
+        label="Normal Shopee (pakai M4)",
         mode_output="inplace",
         default_price_key="M4",
         sku_headers=[MASS_HEADER_SKU],
         input_price_headers=[MASS_HEADER_PRICE],
     ),
     TemplateProfile(
-        key="NORMAL_POWERMERCHANT",
-        label="Normal PowerMerchant (input=output, pakai M3)",
+        key="NORMAL_PM",
+        label="Normal PM (pakai M4)",
         mode_output="inplace",
-        default_price_key="M3",
+        default_price_key="M4",
         sku_headers=[MASS_HEADER_SKU],
         input_price_headers=[MASS_HEADER_PRICE],
     ),
     TemplateProfile(
         key="CORET_TIKTOK",
-        label="Harga Coret TikTok (output beda, pakai M3)",
+        label="Harga Coret TikTok (pakai M3)",
         mode_output="generate",
         default_price_key="M3",
         sku_headers=[MASS_HEADER_SKU],
@@ -93,7 +93,7 @@ TEMPLATES: List[TemplateProfile] = [
     ),
     TemplateProfile(
         key="CORET_SHOPEE",
-        label="Harga Coret Shopee (output beda, pakai M4)",
+        label="Harga Coret Shopee (pakai M4)",
         mode_output="generate",
         default_price_key="M4",
         sku_headers=[MASS_HEADER_SKU],
@@ -108,25 +108,22 @@ TEMPLATES: List[TemplateProfile] = [
         ],
     ),
     TemplateProfile(
-    key="CORET_POWERMERCHANT",
-    label="Harga Coret PowerMerchant (output beda, pakai M4)",
-    mode_output="generate",
-    default_price_key="M4",
-    sku_headers=[MASS_HEADER_SKU],
-    input_price_headers=[MASS_HEADER_PRICE],
-    input_product_headers=[
-        "ID Produk", "ID Produk (wajib)",
-        "Product_id", "Product ID",
-        "Product_id (wajib)", "Product_id(wajib)"
-    ],
-    out_product_header="Product_id (wajib)",
-    out_sku_header="SKU_id (wajib)",
-    out_price_header="Harga Penawaran (wajib)",
-    out_extra_headers=[
-        "Total Stok Promosi (opsional)",
-        "Batas Pembelian (opsional)",
-    ],
-),
+        key="CORET_PM",
+        label="Harga Coret PM (pakai M4)",
+        mode_output="generate",
+        default_price_key="M4",
+        sku_headers=[MASS_HEADER_SKU],
+        input_price_headers=[MASS_HEADER_PRICE],
+        input_product_headers=["ID Produk", "ID Produk (wajib)", "Product_id", "Product ID", "Product_id (wajib)", "Product_id(wajib)"],
+        out_product_header="Product_id (wajib)",
+        out_sku_header="SKU_id (wajib)",
+        out_price_header="Harga Penawaran (wajib)",
+        out_extra_headers=[
+            "Total Stok Promosi (opsional)",
+            "Batas Pembelian (opsional)",
+        ],
+    ),
+]
 
 
 # =========================
@@ -739,3 +736,4 @@ if process:
             file_name="changes_report.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
+
